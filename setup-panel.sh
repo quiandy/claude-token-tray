@@ -50,5 +50,11 @@ args=()
 for i in "${new_ids[@]}"; do args+=(-t int -s "$i"); done
 xfconf-query -c $CHANNEL -p "/panels/panel-$panel/plugin-ids" --force-array "${args[@]}"
 
-xfce4-panel -r
+# Restart the panel; if it doesn't survive (e.g. when run from a non-session
+# shell), relaunch it detached so it isn't tied to this script's lifetime.
+xfce4-panel -r || true
+sleep 3
+if ! pgrep -x xfce4-panel >/dev/null; then
+    setsid -f xfce4-panel >/dev/null 2>&1
+fi
 echo "Added genmon plugin-$id to panel-$panel"
