@@ -33,7 +33,7 @@ Command=$SCRIPT
 UpdatePeriod=5000
 Text=
 UseLabel=0
-Font=(none)
+Font=Sans 11
 EOF
 
 xfconf-query -c $CHANNEL -p "/plugins/plugin-$id" -n -t string -s genmon
