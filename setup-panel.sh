@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # Add the Claude token widget to the xfce4 panel as a genmon plugin.
+#
+# Copyright (C) 2026 Andrea Chiarini
+# SPDX-License-Identifier: LGPL-3.0-or-later
 set -euo pipefail
 
 SCRIPT="$(cd "$(dirname "$0")" && pwd)/claude-token-genmon.py"
