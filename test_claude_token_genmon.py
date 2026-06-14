@@ -335,6 +335,22 @@ class TestRender(Base):
                                 "monthly_limit": 50, "currency": "USD"}}
         self.assertIn("extra usage", self.render(data, "live"))
 
+    def test_icon_image_emitted_and_glyph_dropped(self):
+        icon = self.tmp / "icon.png"
+        icon.write_bytes(b"\x89PNG\r\n")
+        self.m.ICON_IMG = str(icon)
+        data = {"five_hour": {"utilization": 1.0}, "seven_day": {"utilization": 1.0}}
+        out = self.render(data, "live")
+        self.assertIn(f"<img>{icon}</img>", out)
+        self.assertNotIn(self.m.ICON, out)   # text glyph replaced by image
+
+    def test_text_glyph_when_icon_missing(self):
+        self.m.ICON_IMG = str(self.tmp / "does-not-exist.png")
+        data = {"five_hour": {"utilization": 1.0}, "seven_day": {"utilization": 1.0}}
+        out = self.render(data, "live")
+        self.assertNotIn("<img>", out)
+        self.assertIn(self.m.ICON, out)
+
 
 # --------------------------------------------------------------------------- #
 # main() state machine                                                         #

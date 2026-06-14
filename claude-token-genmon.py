@@ -55,6 +55,12 @@ LIVE_MIN_POLL = int(os.environ.get("CLAUDE_LIVE_MIN_POLL", "180"))
 LIVE_STALE_MAX = int(os.environ.get("CLAUDE_LIVE_STALE_SECONDS", "900"))
 
 ICON = "✳"
+# Optional image shown before the text (a small Anthropic-style mark). Set
+# CLAUDE_TRAY_ICON to a different path, or to "" to fall back to the text glyph.
+ICON_IMG = os.environ.get(
+    "CLAUDE_TRAY_ICON",
+    str(Path(__file__).resolve().parent / "assets" / "anthropic.png"),
+)
 HOUR = 3600
 DAY = 86400
 
@@ -281,16 +287,17 @@ def render(data, now, source, age=0.0):
     tag = " (est)" if source == "estimate" else ""
     label_5h = span(f"5h {pct5:.0f}%{tag}", pct5)
     label_7d = span(f"7d {pct7:.0f}%", pct7)
-    parts = [ICON, label_5h, "·", label_7d]
+
+    img = f"<img>{ICON_IMG}</img>" if ICON_IMG and os.path.exists(ICON_IMG) else ""
+    parts = [] if img else [ICON]   # fall back to the text glyph if no image
+    parts += [label_5h, "·", label_7d]
     if reset5:
         parts += ["·", f"↻{reset5}"]
     label = " ".join(parts)
 
     idle = (now - newest_transcript_mtime()) > IDLE_MINUTES * 60
-    if idle:
-        print(f"<txt><span foreground='#888888'>{label}</span></txt>")
-    else:
-        print(f"<txt>{label}</txt>")
+    txt = f"<span foreground='#888888'>{label}</span>" if idle else label
+    print(f"{img}<txt>{txt}</txt>")
 
     if source == "live":
         src_line = "source: live  (GET /api/oauth/usage)"

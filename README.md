@@ -11,6 +11,8 @@ and **weekly** windows, matching what `claude /usage` and claude.ai report.
 ✳ 5h 14% · 7d 6% · ↻02:40
 ```
 
+- the leading mark is a small Anthropic-style logo (`assets/anthropic.png`); the
+  `✳` above is the text fallback shown when no icon image is available
 - `5h 14%` — usage of the current 5-hour window
 - `7d 6%` — usage of the rolling 7-day window (turns amber ≥70%, red ≥90%)
 - `↻02:40` — when the current 5-hour window resets
@@ -36,11 +38,20 @@ Python packages to install** (standard library only).
 ## Quick start
 
 ```sh
-sudo apt install xfce4-genmon-plugin     # if not already installed
+sudo apt install xfce4-genmon-plugin     # Debian/Ubuntu — see below for others
 git clone https://github.com/quiandy/claude-token-tray.git
 cd claude-token-tray
 ./setup-panel.sh
 ```
+
+Installing the GenMon plugin on other distros:
+
+| Distro | Command |
+|---|---|
+| Debian / Ubuntu | `sudo apt install xfce4-genmon-plugin` |
+| Fedora | `sudo dnf install xfce4-genmon-plugin` |
+| Arch | `sudo pacman -S xfce4-genmon-plugin` |
+| openSUSE | `sudo zypper install xfce4-genmon-plugin` |
 
 `setup-panel.sh` registers a new GenMon instance on the first panel (next to the
 status icons) refreshing every 5 seconds. To check the script alone without the
@@ -115,6 +126,7 @@ fallback:
 
 | Variable | Default | Purpose |
 |---|---|---|
+| `CLAUDE_TRAY_ICON` | `assets/anthropic.png` | Image shown before the text. Set to a different path to use your own, or to empty to fall back to the `✳` glyph. |
 | `CLAUDE_IDLE_MINUTES` | `30` | Minutes without transcript writes before the label greys out. |
 | `CLAUDE_HTTP_TIMEOUT` | `4` | Seconds to wait on the usage API. |
 | `CLAUDE_LIVE_MIN_POLL` | `180` | Minimum seconds between API polls; the cache is reused in between. |
@@ -190,6 +202,14 @@ Contributions are welcome — please **open a pull request**:
    to discuss is appreciated.
 
 Bug reports and feature ideas are also welcome via GitHub issues.
+
+## Trademarks
+
+"Anthropic" and "Claude" are trademarks of Anthropic. This is an unofficial,
+community project and is not affiliated with or endorsed by Anthropic. The
+bundled `assets/anthropic.png` is a simple stylised mark (regenerate it with
+`assets/make-icon.py`), not the official logo asset — set `CLAUDE_TRAY_ICON` to
+swap it for your own.
 
 ## License
 
