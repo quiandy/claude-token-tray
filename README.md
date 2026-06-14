@@ -7,14 +7,12 @@ An Xfce panel ([GenMon](https://docs.xfce.org/panel-plugins/xfce4-genmon-plugin/
 widget that shows your **Claude Code** subscription usage across the **5-hour**
 and **weekly** windows, matching what `claude /usage` and claude.ai report.
 
-```
-✳ 5h 14% · 7d 6% · ↻02:40
-```
+![The widget on an Xfce panel](assets/xfce-claude.png)
 
-- the leading mark is a small Anthropic-style logo (`assets/anthropic.png`); the
-  `✳` above is the text fallback shown when no icon image is available
-- `5h 14%` — usage of the current 5-hour window
-- `7d 6%` — usage of the rolling 7-day window (turns amber ≥70%, red ≥90%)
+- the leading mark is a small Anthropic-style logo (`assets/anthropic.png`),
+  with a `✳` text fallback when no icon image is available
+- `5h 36%` — usage of the current 5-hour window
+- `7d 8%` — usage of the rolling 7-day window (turns amber ≥70%, red ≥90%)
 - `↻02:40` — when the current 5-hour window resets
 
 The label greys out when no Claude Code session has written for a while. Hover
