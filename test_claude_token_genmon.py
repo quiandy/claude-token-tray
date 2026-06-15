@@ -204,6 +204,50 @@ class TestFetchLiveUsage(Base):
         self.assertEqual(self.m.fetch_live_usage(), ("fail", None))
 
 
+class TestPollPolicy(Base):
+    def test_session_running_matches_comm_exactly(self):
+        # Fake a /proc with one 'claude' process and some decoys.
+        proc = self.tmp / "proc"
+        for pid, comm in [("100", "claude"), ("200", "python3"),
+                          ("300", "claude-token"), ("bad", "x")]:
+            d = proc / pid
+            d.mkdir(parents=True)
+            (d / "comm").write_text(comm + "\n")
+        self._patch_proc(proc)
+        self.assertTrue(self.m.claude_session_running())
+
+    def test_session_running_false_without_match(self):
+        proc = self.tmp / "proc"
+        for pid, comm in [("100", "python3"), ("200", "node"),
+                          ("300", "claude-token")]:
+            d = proc / pid
+            d.mkdir(parents=True)
+            (d / "comm").write_text(comm + "\n")
+        self._patch_proc(proc)
+        self.assertFalse(self.m.claude_session_running())
+
+    def test_session_running_handles_missing_proc(self):
+        self._patch_proc(self.tmp / "nope")
+        self.assertFalse(self.m.claude_session_running())
+
+    def _patch_proc(self, proc_root):
+        """Redirect the function's /proc reads at a sandbox dir."""
+        real_listdir, real_open = self.m.os.listdir, open
+        self.m.os.listdir = lambda p: real_listdir(
+            str(proc_root) if p == "/proc" else p)
+        import builtins
+        self.m_open = builtins.open
+
+        def fake_open(path, *a, **k):
+            if isinstance(path, str) and path.startswith("/proc/"):
+                path = str(proc_root) + path[len("/proc"):]
+            return real_open(path, *a, **k)
+
+        builtins.open = fake_open
+        self.addCleanup(lambda: setattr(builtins, "open", real_open))
+        self.addCleanup(lambda: setattr(self.m.os, "listdir", real_listdir))
+
+
 class TestStateCache(Base):
     def test_round_trip(self):
         self.m.write_state({"at": 1, "data": {"x": 1}, "retry_until": 0})
@@ -301,14 +345,10 @@ class TestEstimate(Base):
 # Rendering                                                                    #
 # --------------------------------------------------------------------------- #
 class TestRender(Base):
-    def setUp(self):
-        super().setUp()
-        self.m.newest_transcript_mtime = lambda: time.time()  # never idle
-
-    def render(self, data, source, age=0.0):
+    def render(self, data, source, age=0.0, idle=False):
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
-            self.m.render(data, time.time(), source, age)
+            self.m.render(data, time.time(), source, age, idle)
         return buf.getvalue()
 
     def test_live_label_and_tooltip(self):
@@ -324,10 +364,22 @@ class TestRender(Base):
         data = {"five_hour": {"utilization": 5.0}, "seven_day": {"utilization": 9.0}}
         self.assertIn("(est)", self.render(data, "estimate"))
 
-    def test_idle_greys_label(self):
-        self.m.newest_transcript_mtime = lambda: 0  # ancient -> idle
+    def test_idle_dims_whole_widget_and_marks_tooltip(self):
         data = {"five_hour": {"utilization": 1.0}, "seven_day": {"utilization": 1.0}}
-        self.assertIn("#888888", self.render(data, "live"))
+        out = self.render(data, "cache", age=42, idle=True)
+        self.assertIn(self.m.IDLE_COLOUR, out)            # darker idle grey
+        self.assertIn("[idle]", out)
+        self.assertIn("no Claude session", out)
+
+    def test_stale_cache_greyed_lighter_than_idle(self):
+        self.m.LIVE_STALE_MAX = 900
+        data = {"five_hour": {"utilization": 1.0}, "seven_day": {"utilization": 1.0}}
+        # fresh cache, active session -> not greyed
+        self.assertNotIn(self.m.STALE_COLOUR, self.render(data, "cache", age=10))
+        # cache older than the staleness cap -> lighter stale grey, not idle grey
+        out = self.render(data, "cache", age=1000)
+        self.assertIn(self.m.STALE_COLOUR, out)
+        self.assertNotIn(self.m.IDLE_COLOUR, out)
 
     def test_extra_usage_shown_when_enabled(self):
         data = {"five_hour": {"utilization": 1.0}, "seven_day": {"utilization": 1.0},
@@ -358,7 +410,9 @@ class TestRender(Base):
 class TestMain(Base):
     def setUp(self):
         super().setUp()
-        self.m.newest_transcript_mtime = lambda: time.time()
+        # Default to an active session so the normal poll cadence applies; the
+        # no-session tests override this.
+        self.m.claude_session_running = lambda: True
         self.live = {"five_hour": {"utilization": 14.0, "resets_at": None},
                      "seven_day": {"utilization": 6.0, "resets_at": None}}
 
@@ -381,14 +435,58 @@ class TestMain(Base):
         self.assertIn("source: live", out)
         self.assertEqual(self.m.read_state()["data"], self.live)
 
-    def test_backoff_keeps_last_good_and_sets_retry_until(self):
+    def test_backoff_keeps_last_good_as_cache_and_sets_retry_until(self):
         now = time.time()
         # stale enough to attempt a poll
         self.m.write_state({"at": now - 999, "data": self.live, "retry_until": 0})
         self.m.fetch_live_usage = lambda: ("backoff", 150)
         out = self.run_main()
-        self.assertIn("source: live", out)
+        # last good numbers are still shown, but honestly marked as cached
+        self.assertIn("5h 14%", out)
+        self.assertIn("source: cached live", out)
+        self.assertNotIn("source: live  ", out)
         self.assertGreater(self.m.read_state()["retry_until"], now)
+
+    def test_backoff_caps_overlong_retry_after(self):
+        now = time.time()
+        self.m.LIVE_BACKOFF_MAX = 300
+        self.m.write_state({"at": now - 999, "data": self.live, "retry_until": 0})
+        # endpoint asks us to wait ~5h; we must not honour it verbatim
+        self.m.fetch_live_usage = lambda: ("backoff", 18000)
+        self.run_main()
+        retry_until = self.m.read_state()["retry_until"]
+        self.assertLessEqual(retry_until - now, self.m.LIVE_BACKOFF_MAX + 2)
+        self.assertGreater(retry_until, now)
+
+    def test_no_session_never_polls_and_dims(self):
+        now = time.time()
+        # no running Claude session -> stop polling entirely, however old the
+        # cache is, and dim the whole widget as idle.
+        self.m.claude_session_running = lambda: False
+        self.m.write_state({"at": now - 99999, "data": self.live, "retry_until": 0})
+        self._no_network()  # must NOT hit the API regardless of cache age
+        out = self.run_main()
+        self.assertIn("5h 14%", out)
+        self.assertIn(self.m.IDLE_COLOUR, out)
+        self.assertIn("[idle]", out)
+
+    def test_no_session_no_cache_shows_idle_placeholder(self):
+        self.m.claude_session_running = lambda: False
+        self.m.estimate_usage = lambda _now: None
+        self._no_network()
+        out = self.run_main()
+        self.assertIn("idle", out)
+        self.assertIn(self.m.IDLE_COLOUR, out)
+
+    def test_active_session_repolls_after_min_poll(self):
+        now = time.time()
+        self.m.LIVE_MIN_POLL = 180
+        self.m.claude_session_running = lambda: True
+        self.m.write_state({"at": now - 300, "data": self.live, "retry_until": 0})
+        fresh = {"five_hour": {"utilization": 50.0, "resets_at": None},
+                 "seven_day": {"utilization": 20.0, "resets_at": None}}
+        self.m.fetch_live_usage = lambda: ("ok", fresh)
+        self.assertIn("5h 50%", self.run_main())
 
     def test_within_retry_until_does_not_poll(self):
         now = time.time()

@@ -15,7 +15,9 @@ and **weekly** windows, matching what `claude /usage` and claude.ai report.
 - `7d 8%` — usage of the rolling 7-day window (turns amber ≥70%, red ≥90%)
 - `↻02:40` — when the current 5-hour window resets
 
-The label greys out when no Claude Code session has written for a while. Hover
+The whole label dims to a darker grey when **no Claude Code session is
+running** — with no session, usage isn't moving, so the widget stops polling
+entirely until you start working again (see *Polling and rate limits*). Hover
 the widget for both percentages, reset times, and any extra-usage (overage)
 status.
 
@@ -102,10 +104,21 @@ the endpoint is just easier to poll.) The last good response is cached in
 
 The panel refreshes every ~5 seconds, but `/api/oauth/usage` is **itself
 rate-limited** (HTTP 429 with a `Retry-After` of a few minutes), and utilization
-moves slowly. So the widget polls at most once per `CLAUDE_LIVE_MIN_POLL`
-seconds (default 180) and serves the cache in between. If it does get a 429, it
-honours `Retry-After` and keeps showing the last good numbers until the window
-clears.
+moves slowly. The widget keeps API traffic minimal in two ways:
+
+- **Session-gated.** On every ~5 s tick it checks whether a Claude Code process
+  is actually running (the `claude` CLI, detected via `/proc`). With **no
+  session running it does not poll at all** — it shows the last cached numbers,
+  dimmed to the darker idle grey. Polling resumes on the very next tick once you
+  start a session again.
+- **Throttled while active.** With a session running it polls at most once per
+  `CLAUDE_LIVE_MIN_POLL` seconds (default 180) and serves the cache in between.
+
+If a poll does return a 429, it honours `Retry-After` — capped at
+`CLAUDE_LIVE_BACKOFF_SECONDS` (default 300) so an unusually long value can't
+freeze the panel — and keeps showing the last good numbers, marked as cached,
+until the window clears. The last good response is cached in
+`~/.cache/claude-token-tray/usage.json`.
 
 ### Fallback estimate
 
@@ -125,9 +138,10 @@ fallback:
 | Variable | Default | Purpose |
 |---|---|---|
 | `CLAUDE_TRAY_ICON` | `assets/anthropic.png` | Image shown before the text. Set to a different path to use your own, or to empty to fall back to the `✳` glyph. |
-| `CLAUDE_IDLE_MINUTES` | `30` | Minutes without transcript writes before the label greys out. |
+| `CLAUDE_IDLE_COLOUR` | `#666666` | Colour the whole label dims to when no Claude session is running. |
 | `CLAUDE_HTTP_TIMEOUT` | `4` | Seconds to wait on the usage API. |
-| `CLAUDE_LIVE_MIN_POLL` | `180` | Minimum seconds between API polls; the cache is reused in between. |
+| `CLAUDE_LIVE_MIN_POLL` | `180` | Minimum seconds between API polls while a session is running; the cache is reused in between. (With no session, polling is suspended entirely.) |
+| `CLAUDE_LIVE_BACKOFF_SECONDS` | `300` | Cap on how long a 429 `Retry-After` may suppress polling, so an over-long value can't freeze the panel. |
 | `CLAUDE_LIVE_STALE_SECONDS` | `900` | How long a cached live result is shown when the API is unreachable before falling back to the estimate. |
 | `CLAUDE_5H_BUDGET` / `CLAUDE_WEEKLY_BUDGET` | `6000000` / `60000000` | *Estimate only:* weighted-token budgets. |
 | `CLAUDE_W_INPUT` / `CLAUDE_W_OUTPUT` / `CLAUDE_W_CACHE_READ` / `CLAUDE_W_CACHE_WRITE` | `1` / `5` / `0.1` / `1.25` | *Estimate only:* per-token weights. |
@@ -161,6 +175,11 @@ font (see the font note above).
 **Shows `(est)` instead of live numbers.** The API call isn't succeeding —
 you're offline, the OAuth token expired (re-run Claude Code to refresh it), or
 you've been rate-limited (it recovers automatically within a few minutes).
+
+**The label is dimmed and the numbers aren't updating.** That's the idle state:
+no `claude` process is running, so the widget intentionally stops polling and
+shows the last known numbers. Start a Claude Code session and it refreshes on
+the next tick.
 
 **My panel edits keep getting reverted.** A *running* xfce4-panel owns
 `~/.config/xfce4/panel/genmon-<id>.rc` and rewrites it from memory on restart,

@@ -49,10 +49,15 @@ USAGE_CACHE = CACHE_DIR / "usage.json"          # last good live result
 USAGE_URL = "https://api.anthropic.com/api/oauth/usage"
 HTTP_TIMEOUT = float(os.environ.get("CLAUDE_HTTP_TIMEOUT", "4"))
 # Don't re-poll the API if the cached live result is younger than this; the
-# panel refreshes every ~5s but utilization moves slowly (seconds).
+# panel refreshes every ~5s but utilization moves slowly (seconds). Only used
+# while a Claude session is running -- with no session we don't poll at all.
 LIVE_MIN_POLL = int(os.environ.get("CLAUDE_LIVE_MIN_POLL", "180"))
 # How long a cached live result stays usable when a refresh fails (seconds).
 LIVE_STALE_MAX = int(os.environ.get("CLAUDE_LIVE_STALE_SECONDS", "900"))
+# Cap how long a 429 Retry-After may suppress polling. The endpoint occasionally
+# returns multi-hour values; honouring them verbatim freezes the panel for hours
+# on a snapshot, so we clamp and just retry a bit later.
+LIVE_BACKOFF_MAX = int(os.environ.get("CLAUDE_LIVE_BACKOFF_SECONDS", "300"))
 
 ICON = "✳"
 # Optional image shown before the text (a small Anthropic-style mark). Set
@@ -64,8 +69,10 @@ ICON_IMG = os.environ.get(
 HOUR = 3600
 DAY = 86400
 
-# After this many minutes without transcript writes, grey the label out.
-IDLE_MINUTES = int(os.environ.get("CLAUDE_IDLE_MINUTES", "30"))
+# Whole-widget dim shown when no Claude session is running (idle); a lighter
+# grey marks an active session that is showing aged data during a back-off.
+IDLE_COLOUR = os.environ.get("CLAUDE_IDLE_COLOUR", "#666666")
+STALE_COLOUR = "#888888"
 
 # --- fallback-estimate tunables (only used when the live API is unreachable) --
 WINDOW_5H = int(os.environ.get("CLAUDE_5H_SECONDS", str(5 * HOUR)))
@@ -266,17 +273,30 @@ def reset_hm(resets_at):
     return datetime.fromtimestamp(epoch).strftime("%H:%M") if epoch else None
 
 
-def newest_transcript_mtime():
-    latest = 0.0
-    for path in PROJECTS_DIR.glob("*/*.jsonl"):
+def claude_session_running():
+    """True if a Claude Code CLI process is currently alive.
+
+    The CLI's process name (/proc/<pid>/comm) is exactly "claude". We scan /proc
+    directly (Linux; this is an Xfce panel widget) rather than shelling out, and
+    match comm exactly to avoid the false positives of a substring search -- our
+    own python process, shells with 'claude' in their argv, this widget, etc."""
+    try:
+        pids = os.listdir("/proc")
+    except OSError:
+        return False
+    for pid in pids:
+        if not pid.isdigit():
+            continue
         try:
-            latest = max(latest, path.stat().st_mtime)
+            with open(f"/proc/{pid}/comm") as fh:
+                if fh.read().strip() == "claude":
+                    return True
         except OSError:
-            pass
-    return latest
+            continue
+    return False
 
 
-def render(data, now, source, age=0.0):
+def render(data, now, source, age=0.0, idle=False):
     fh = data.get("five_hour") or {}
     sd = data.get("seven_day") or {}
     pct5 = float(fh.get("utilization") or 0)
@@ -295,16 +315,21 @@ def render(data, now, source, age=0.0):
         parts += ["·", f"↻{reset5}"]
     label = " ".join(parts)
 
-    idle = (now - newest_transcript_mtime()) > IDLE_MINUTES * 60
-    txt = f"<span foreground='#888888'>{label}</span>" if idle else label
+    # Idle (no session) dims the whole widget darker; an active session showing
+    # aged data during a back-off gets the lighter "stale" grey.
+    stale = source == "cache" and age > LIVE_STALE_MAX
+    dim = IDLE_COLOUR if idle else (STALE_COLOUR if stale else None)
+    txt = f"<span foreground='{dim}'>{label}</span>" if dim else label
     print(f"{img}<txt>{txt}</txt>")
 
-    if source == "live":
-        src_line = "source: live  (GET /api/oauth/usage)"
-    elif source == "cache":
-        src_line = f"source: cached live ({int(age)}s old)"
-    else:
+    if source == "estimate":
         src_line = "source: ESTIMATE -- API unreachable; calibrate budgets"
+    elif idle:
+        src_line = f"source: idle -- no Claude session (last live {int(age)}s old)"
+    elif source == "live":
+        src_line = "source: live  (GET /api/oauth/usage)"
+    else:
+        src_line = f"source: cached live ({int(age)}s old)"
 
     tip = [f"Claude usage{'  [idle]' if idle else ''}", "", src_line, ""]
     tip.append(f"5-hour window: {pct5:.0f}%")
@@ -327,11 +352,32 @@ def main():
     data, at = state.get("data"), state.get("at", 0)
     age = now - at
 
-    # Serve a recent result without re-polling: either the cache is still fresh,
-    # or the endpoint told us (via 429 Retry-After) not to call again yet. The
-    # panel ticks every ~5s but /api/oauth/usage is itself rate-limited.
-    if data and (age < LIVE_MIN_POLL or now < state.get("retry_until", 0)):
+    # Checked on every ~5s tick: with no Claude session running, usage isn't
+    # being spent, so we stop polling the (rate-limited) endpoint entirely and
+    # just show the last known numbers, whole-widget dimmed to signal idle.
+    # Polling resumes on the very next tick once a session reappears.
+    if not claude_session_running():
+        if data:
+            render(data, now, "cache", age, idle=True)
+            return
+        est = estimate_usage(now)
+        if est is not None:
+            render(est, now, "estimate", idle=True)
+            return
+        print(f"<txt><span foreground='{IDLE_COLOUR}'>{ICON} idle</span></txt>")
+        print("<tool>No Claude session running and no usage data yet.</tool>")
+        return
+
+    # Active session. Serve a recent result without re-polling: the panel ticks
+    # every ~5s but /api/oauth/usage is rate-limited and utilization moves slowly.
+    if data and age < LIVE_MIN_POLL:
         render(data, now, "live")
+        return
+
+    # Still inside a 429 back-off window: don't re-poll yet, but show the last
+    # good numbers honestly as cached (greyed once stale) -- not as "live".
+    if data and now < state.get("retry_until", 0):
+        render(data, now, "cache", age)
         return
 
     status, payload = fetch_live_usage()
@@ -340,10 +386,10 @@ def main():
         render(payload, now, "live")
         return
     if status == "backoff" and data:
-        state["retry_until"] = now + payload
+        # Clamp Retry-After so one over-long value can't freeze the panel.
+        state["retry_until"] = now + min(payload, LIVE_BACKOFF_MAX)
         write_state(state)
-        # keep showing the last good numbers while backing off
-        render(data, now, "live")
+        render(data, now, "cache", age)
         return
 
     # Live unavailable -- show a still-usable older cache, then the estimate.
