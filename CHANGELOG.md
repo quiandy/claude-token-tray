@@ -31,6 +31,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `CLAUDE_IDLE_MINUTES` — superseded by the session-presence check.
 
 ### Fixed
+- `setup-panel.sh` now writes the GenMon command/settings to xfconf as well as
+  the `genmon-<id>.rc` file. Newer `xfce4-genmon-plugin` versions load from
+  xfconf, so rc-only installs could come up blank on those versions.
 - A long 429 `Retry-After` from `/api/oauth/usage` could freeze the panel on a
   hours-old snapshot while still labelling it `live`.
 

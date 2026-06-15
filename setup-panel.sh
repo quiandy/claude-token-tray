@@ -21,6 +21,12 @@ for id in $existing; do
     rc="$HOME/.config/xfce4/panel/genmon-$id.rc"
     if [ -f "$rc" ] && grep -q "$SCRIPT" "$rc"; then
         echo "Widget already configured as plugin-$id"
+        # Newer genmon reads the command from xfconf; if a panel blanked it
+        # (the "(genmon)" placeholder bug) point the user at the repair script.
+        cur=$(xfconf-query -c $CHANNEL -p "/plugins/plugin-$id/command" 2>/dev/null || true)
+        if [[ "$cur" != *claude-token-genmon.py* ]]; then
+            echo "  note: its xfconf command is blank — run ./fix-tray.sh to restore it." >&2
+        fi
         exit 0
     fi
 done
@@ -40,6 +46,15 @@ Font=Sans 11
 EOF
 
 xfconf-query -c $CHANNEL -p "/plugins/plugin-$id" -n -t string -s genmon
+
+# Newer xfce4-genmon-plugin versions read their settings from xfconf rather than
+# the rc file written above, so set them there too — the same command takes
+# effect regardless of plugin version. (The rc stays as the source fix-tray.sh
+# restores the command from if a panel ever blanks the xfconf copy.)
+xfconf-query -c $CHANNEL -p "/plugins/plugin-$id/command"       -n -t string -s "$SCRIPT"
+xfconf-query -c $CHANNEL -p "/plugins/plugin-$id/use-label"     -n -t bool   -s false
+xfconf-query -c $CHANNEL -p "/plugins/plugin-$id/update-period" -n -t int    -s 5000
+xfconf-query -c $CHANNEL -p "/plugins/plugin-$id/font"          -n -t string -s "Sans 11"
 
 # Append the new id to the first panel's plugin list, before the last two
 # items (typically pulseaudio/clock) so it lands near the status icons.
