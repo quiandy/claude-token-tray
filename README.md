@@ -35,6 +35,25 @@ Python packages to install** (standard library only).
 | A Claude **subscription** (Pro/Max) | The usage windows are a subscription feature. |
 | Network access to `api.anthropic.com` | For the live percentages. Without it the widget falls back to an offline estimate. |
 
+### Xfce and GenMon versions
+
+Developed and tested on **Xfce 4.20** with **xfce4-genmon-plugin 4.3**, but it
+isn't tied to a specific version. The only version-dependent detail is *where
+GenMon keeps its configuration*, and the tooling handles both styles:
+
+| GenMon | Toolkit | Config stored in |
+|---|---|---|
+| 4.x (current) | GTK 3 | **xfconf** — `/plugins/plugin-<id>/…` |
+| 3.x (older) | GTK 2 | the **`~/.config/xfce4/panel/genmon-<id>.rc`** file |
+
+`setup-panel.sh` writes **both** the `.rc` file and the xfconf properties, so a
+fresh install works on either series without you needing to know which one you
+have. On the xfconf series, an unclean shutdown can blank the stored command
+(see *After a reboot the widget shows only `(genmon)`* under Troubleshooting);
+`fix-tray.sh` restores it from the `.rc`. The script itself is plain Python and
+GenMon-version-agnostic — it only reads/writes stdout, so any GenMon that runs a
+command works.
+
 ## Quick start
 
 ```sh
