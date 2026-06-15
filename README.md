@@ -181,18 +181,37 @@ no `claude` process is running, so the widget intentionally stops polling and
 shows the last known numbers. Start a Claude Code session and it refreshes on
 the next tick.
 
-**My panel edits keep getting reverted.** A *running* xfce4-panel owns
-`~/.config/xfce4/panel/genmon-<id>.rc` and rewrites it from memory on restart,
-so editing under a live panel gets clobbered. Write the rc first, then hard-kill
-the panel so the session respawns it from your file:
+**After a reboot the widget shows only `(genmon)`.** Newer
+`xfce4-genmon-plugin` versions store their settings in **xfconf**
+(`/plugins/plugin-<id>/command`), not the `.rc` file. An unclean shutdown can
+make the panel save an *empty* command back to xfconf, so on next login the
+plugin has nothing to run and falls back to its `(genmon)` placeholder. A plain
+`xfce4-panel -r` won't fix it — the restarting panel just re-saves the empty
+value over anything you write. The command has to be restored **while the panel
+is stopped**. Run the bundled repair script:
+
+```sh
+./fix-tray.sh
+```
+
+It finds the widget's plugin id, stops the panel, rewrites the command (reusing
+your `genmon-<id>.rc` `Command=` line, env vars and all), and starts a fresh
+panel that reads the restored value back in.
+
+**My panel edits keep getting reverted.** A *running* xfce4-panel owns its
+plugin config and rewrites it from memory on restart, so editing under a live
+panel gets clobbered. Stop the panel first, then write — which is exactly what
+`fix-tray.sh` does for the GenMon command. To hand-edit a `.rc`-based GenMon,
+write the rc first, then hard-kill the panel so the session respawns it from
+your file:
 
 ```sh
 pkill -9 -x xfce4-panel        # the session respawns it, reading your new rc
 ```
 
-When driving this from a non-login shell, export the panel's session vars first
-(`DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`) — read them from
-`/proc/$(pgrep -x xfce4-panel)/environ`.
+When driving any of this from a non-login shell, the panel's session vars
+(`DISPLAY`, `DBUS_SESSION_BUS_ADDRESS`) must be set — read them from
+`/proc/$(pgrep -x xfce4-panel)/environ`. `fix-tray.sh` does this for you.
 
 ## Development
 

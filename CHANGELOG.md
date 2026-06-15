@@ -17,6 +17,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   stale) instead of being shown as `live`.
 
 ### Added
+- `fix-tray.sh`: repairs the widget when the Xfce panel blanks the GenMon
+  command in xfconf after an unclean shutdown (the `(genmon)` placeholder
+  symptom). It restores the command while the panel is stopped so the restart
+  can't re-save the empty value. Documented under Troubleshooting.
 - `CLAUDE_LIVE_BACKOFF_SECONDS` (default 300): caps how long a 429 `Retry-After`
   may suppress polling, so an unusually long value can no longer freeze the
   panel on a stale snapshot for hours.
